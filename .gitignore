@@ -1,0 +1,38 @@
+# Keil 编译生成文件
+*.axf
+*.lst
+*.dep
+*.crf
+*.o
+*.d
+*.lnp
+*.build_log.htm
+*.map
+*.hex
+*.bin
+
+# Keil 临时配置文件
+*.uvguix.*
+*.uvoptx
+*.uvprojx.user
+
+# 编译输出目录
+/Objects/
+/Listings/
+/Debug/
+/Release/
+
+# 日志和临时文件
+JLinkLog.txt
+*.log
+*.log.lock
+*.htm
+*.sct
+
+# VSCode 配置
+.vscode/
+.vcode/
+
+# 系统文件
+.DS_Store
+Thumbs.db
