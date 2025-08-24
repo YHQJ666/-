@@ -33,56 +33,48 @@ typedef struct {
 static UART_TxBuffer_t txBuffer;
 static volatile bool isTransmitting = false;
 
-// 初始化串口（波特率等配置）
-//void USART_Init(void) {
-//    // 你的原有硬件初始化代码（GPIO、USART配置等）
-//    // ...
-//    
-//    // 启用串口发送中断
-//    USART_ITConfig(USART1, USART_IT_TXE, ENABLE);
-//    NVIC_EnableIRQ(USART1_IRQn);
-//}
 
-// 非阻塞发送字符串（返回是否成功入队）
-//bool USART_SendString(const char *str) {
-//    if (!str) return false;
-//    
-//    // 将字符串写入缓冲区
-//    while (*str != '\0') {
-//        uint16_t nextHead = (txBuffer.head + 1) % TX_BUFFER_SIZE;
-//        
-//        // 缓冲区满时等待（可加超时机制）
-//        if (nextHead == txBuffer.tail) {
-//            return false;  // 缓冲区满，发送失败
-//        }
-//        
-//        txBuffer.buffer[txBuffer.head] = *str++;
-//        txBuffer.head = nextHead;
-//    }
-//    
-//    // 如果当前没有在发送，则触发发送中断
-//    if (!isTransmitting) {
-//        isTransmitting = true;
-//        USART_ITConfig(USART1, USART_IT_TXE, ENABLE);  // 启用TXE中断
-//    }
-//    
-//    return true;
-//}
 
-//// 串口中断处理函数
-//void USART1_IRQHandler(void) {
-//    if (USART_GetITStatus(USART1, USART_IT_TXE) != RESET) {
-//        if (txBuffer.head != txBuffer.tail) {
-//            // 发送缓冲区中的数据
-//            USART_SendData(USART1, txBuffer.buffer[txBuffer.tail]);
-//            txBuffer.tail = (txBuffer.tail + 1) % TX_BUFFER_SIZE;
-//        } else {
-//            // 缓冲区空，关闭TXE中断
-//            USART_ITConfig(USART1, USART_IT_TXE, DISABLE);
-//            isTransmitting = false;
-//        }
-//    }
-//}
+ //非阻塞发送字符串（返回是否成功入队）
+bool USART_SendString(const char *str) {
+    if (!str) return false;
+    
+    // 将字符串写入缓冲区
+    while (*str != '\0') {
+        uint16_t nextHead = (txBuffer.head + 1) % TX_BUFFER_SIZE;
+        
+        // 缓冲区满时等待（可加超时机制）
+        if (nextHead == txBuffer.tail) {
+            return false;  // 缓冲区满，发送失败
+        }
+        
+        txBuffer.buffer[txBuffer.head] = *str++;
+        txBuffer.head = nextHead;
+    }
+    
+    // 如果当前没有在发送，则触发发送中断
+    if (!isTransmitting) {
+        isTransmitting = true;
+        USART_ITConfig(USART1, USART_IT_TXE, ENABLE);  // 启用TXE中断
+    }
+    
+    return true;
+}
+
+// 串口中断处理函数
+void USART1_IRQHandler(void) {
+    if (USART_GetITStatus(USART1, USART_IT_TXE) != RESET) {
+        if (txBuffer.head != txBuffer.tail) {
+            // 发送缓冲区中的数据
+            USART_SendData(USART1, txBuffer.buffer[txBuffer.tail]);
+            txBuffer.tail = (txBuffer.tail + 1) % TX_BUFFER_SIZE;
+        } else {
+            // 缓冲区空，关闭TXE中断
+            USART_ITConfig(USART1, USART_IT_TXE, DISABLE);
+            isTransmitting = false;
+        }
+    }
+}
 
 
 
@@ -120,9 +112,10 @@ void usart_Init(void)
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
-    USART_ITConfig(USARTx, USART_IT_TXE, DISABLE);  // 先关闭发送中断
+//    USART_ITConfig(USARTx, USART_IT_TXE, DISABLE);  // 先关闭发送中断
     USART_ITConfig(USARTx, USART_IT_RXNE, ENABLE);  // 可选：启用接收中断
-    
+    USART_ITConfig(USART1, USART_IT_TXE, ENABLE);
+    NVIC_EnableIRQ(USART1_IRQn);
 
 //    NVIC_EnableIRQ(USART1_IRQn);
 
@@ -137,6 +130,17 @@ bool USART_SendByte(uint8_t Byte) {
         if (++timeout > USART_TIMEOUT) return false;
     }
     USART_SendData(USARTx, Byte);
+//	uint16_t next_head = (usart_tx_head + 1) % USART_TX_BUF_SIZE;
+//    while (next_head == usart_tx_tail) {
+//        // 缓冲区满，等待或者丢弃数据
+//        taskYIELD(); // 让出CPU
+//    }
+//    usart_tx_buf[usart_tx_head] = byte;
+//    usart_tx_head = next_head;
+
+    // 开启发送中断
+    USART1->CR1 |= USART_CR1_TXEIE;
+	
     return true;
 }
 void USART_SendArray(uint8_t *Array, uint16_t Length)
@@ -146,13 +150,13 @@ void USART_SendArray(uint8_t *Array, uint16_t Length)
         USART_SendByte(Array[i]);
     }
 }
-void USART_SendString(char *String)
-{
-    while (*String != '\0')
-    {
-        USART_SendByte(*String++);
-    }
-}
+//void USART_SendString(char *String)
+//{
+//    while (*String != '\0')
+//    {
+//        USART_SendByte(*String++);
+//    }
+//}
 void USART_SendNumber(uint32_t Number, uint8_t Length)
 {
     char buffer[11]; // 32位无符号整数最大长度为10位，加上结束符'\0'，所以长度为11

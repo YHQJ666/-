@@ -1,0 +1,213 @@
+/*******************************
+ * 文件：snake_tasks.c
+ * 功能：贪吃蛇游戏FreeRTOS任务实现
+ * 硬件：STM32F103 + MPU6050 x2 + OLED屏
+ * 作者：智能助手
+ * 版本：v1.2
+ *******************************/
+
+#include "snake.h"
+#include "mpu6050.h"
+#include "config.h"
+#include "i2c.h"
+#include "usart.h"
+#include <math.h>
+#include <stdlib.h>
+
+/* 硬件配置 */
+#define MPU6050_ADDR1   0x68    // AD0接GND
+#define MPU6050_ADDR2   0x69    // AD0接VCC
+#define SNAKE_UPDATE_MS 100     // 游戏更新周期(ms)
+#define DISPLAY_FPS     15      // 显示刷新率(Hz)
+
+/* 全局FreeRTOS对象 */
+QueueHandle_t xMPU6050Queue;    // MPU6050数据队列
+SemaphoreHandle_t xDisplaySemaphore; // 显示更新信号量
+SemaphoreHandle_t xGameStateMutex;   // 游戏状态互斥锁
+SemaphoreHandle_t xI2CMutex;         // I2C总线互斥锁
+
+/* 静态函数声明 */
+static Direction_e GetDirectionFromMPU(int16_t accel_x, int16_t accel_y);
+static void UpdateSnakePosition(SnakeGame_t* game);
+
+/*********************************
+ * MPU6050数据读取任务
+ * 优先级：3 (较高)
+ *********************************/
+void vMPU6050Task(void *pvParameters) {
+    MPU6050Data_t mpu_data;
+    int16_t accel_x, accel_y, accel_z;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(20); // 50Hz采样
+    
+    // 初始化MPU6050
+    mpu6050_init();
+    USART_Printf("[MPU] Task started\r\n");
+
+    while(1) {
+        for(uint8_t player = 1; player <= 2; player++) {
+            uint8_t mpu_addr = (player == 1) ? MPU6050_ADDR1 : MPU6050_ADDR2;
+            
+            // 保护I2C总线访问
+            if(xSemaphoreTake(xI2CMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                uint8_t retry = 0;
+                while(mpu6050_read_accel_simple(mpu_addr, &accel_x, &accel_y, &accel_z) != 0 && 
+                      retry++ < 3) {
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                }
+                xSemaphoreGive(xI2CMutex);
+                
+                if(retry < 3) {
+                    Direction_e dir = GetDirectionFromMPU(accel_x, accel_y);
+                    if(dir != DIR_INVALID) {
+                        mpu_data.player_id = player;
+                        mpu_data.direction = dir;
+                        
+                        // 非阻塞发送方向数据
+                        if(xQueueSend(xMPU6050Queue, &mpu_data, 0) {
+                            USART_Printf("[MPU] P%d Dir:%d\r\n", player, dir);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 精确周期延时
+        xTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
+/*********************************
+ * 游戏逻辑任务
+ * 优先级：2 (中等)
+ *********************************/
+void vGameLogicTask(void *pvParameters) {
+    MPU6050Data_t mpu_data;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(SNAKE_UPDATE_MS);
+    
+    USART_Printf("[Game] Task started\r\n");
+
+    while(1) {
+        // 处理MPU6050输入
+        while(xQueueReceive(xMPU6050Queue, &mpu_data, 0) {
+            if(xSemaphoreTake(xGameStateMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                snake_update_direction(&g_game, mpu_data.player_id, mpu_data.direction);
+                xSemaphoreGive(xGameStateMutex);
+            }
+        }
+        
+        // 更新游戏状态
+        if(xSemaphoreTake(xGameStateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if(g_game.game_state == GAME_RUNNING) {
+                UpdateSnakePosition(&g_game);
+                xSemaphoreGive(xDisplaySemaphore); // 触发显示更新
+            }
+            xSemaphoreGive(xGameStateMutex);
+        }
+        
+        xTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
+/*********************************
+ * 显示任务
+ * 优先级：4 (最高)
+ *********************************/
+void vDisplayTask(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(1000/DISPLAY_FPS);
+    
+    USART_Printf("[Display] Task started\r\n");
+    
+    // 初始绘制
+    if(xSemaphoreTake(xGameStateMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        snake_draw_game(&g_game);
+        xSemaphoreGive(xGameStateMutex);
+    }
+
+    while(1) {
+        // 等待信号量或超时(保证最低刷新率)
+        if(xSemaphoreTake(xDisplaySemaphore, xFrequency) == pdTRUE || 
+           uxQueueMessagesWaiting(xDisplaySemaphore) > 0) {
+            
+            if(xSemaphoreTake(xGameStateMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                snake_draw_game(&g_game);
+                xSemaphoreGive(xGameStateMutex);
+            }
+        }
+        
+        // 精确周期控制
+        xTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
+/*********************************
+ * 辅助函数：从加速度计获取方向
+ *********************************/
+static Direction_e GetDirectionFromMPU(int16_t accel_x, int16_t accel_y) {
+    // 死区过滤
+    if(abs(accel_x) < TILT_THRESHOLD && abs(accel_y) < TILT_THRESHOLD) {
+        return DIR_INVALID;
+    }
+    
+    // 主方向判断
+    if(abs(accel_x) > abs(accel_y)) {
+        return (accel_x > 0) ? DIR_RIGHT : DIR_LEFT;
+    } else {
+        return (accel_y > 0) ? DIR_DOWN : DIR_UP;
+    }
+}
+
+/*********************************
+ * 辅助函数：更新蛇位置
+ *********************************/
+static void UpdateSnakePosition(SnakeGame_t* game) {
+    for(uint8_t i = 0; i < 2; i++) {
+        Snake_t* snake = &game->snakes[i];
+        
+        // 移动蛇身
+        for(int j = snake->length-1; j > 0; j--) {
+            snake->body[j] = snake->body[j-1];
+        }
+        
+        // 更新头部
+        switch(snake->direction) {
+            case DIR_UP:    snake->body[0].y--; break;
+            case DIR_DOWN:  snake->body[0].y++; break;
+            case DIR_LEFT:  snake->body[0].x--; break;
+            case DIR_RIGHT: snake->body[0].x++; break;
+            default: break;
+        }
+        
+        // 边界检查
+        if(snake->body[0].x < 0) snake->body[0].x = MAP_WIDTH-1;
+        if(snake->body[0].x >= MAP_WIDTH) snake->body[0].x = 0;
+        if(snake->body[0].y < 0) snake->body[0].y = MAP_HEIGHT-1;
+        if(snake->body[0].y >= MAP_HEIGHT) snake->body[0].y = 0;
+    }
+}
+
+/*********************************
+ * 创建所有任务和同步对象
+ *********************************/
+void snake_create_tasks(void) {
+    // 创建同步对象
+    xMPU6050Queue = xQueueCreate(5, sizeof(MPU6050Data_t));
+    xDisplaySemaphore = xSemaphoreCreateBinary();
+    xGameStateMutex = xSemaphoreCreateMutex();
+    xI2CMutex = xSemaphoreCreateMutex();
+    
+    // 初始化游戏
+    snake_game_init();
+    g_game.game_state = GAME_RUNNING;
+    
+    // 创建任务（栈大小根据需求调整）
+    xTaskCreate(vMPU6050Task, "MPU", 256, NULL, 3, NULL);
+    xTaskCreate(vGameLogicTask, "Game", 512, NULL, 2, NULL);
+    xTaskCreate(vDisplayTask, "Disp", 512, NULL, 4, NULL);
+    
+    // 初始显示更新
+    xSemaphoreGive(xDisplaySemaphore);
+    USART_Printf("[System] All tasks created\r\n");
+}

@@ -28,11 +28,13 @@ typedef struct
     float z;
 } mpu6050_gyro_t;
 
+bool MPU6050_Init(uint8_t addr);
+bool MPU6050_ReadAccel(uint8_t addr, mpu6050_accel_t *accel);
 
-bool mpu6050_init(void);
-void mpu6050_read_accel(mpu6050_accel_t *accel);
-void mpu6050_read_gyro(mpu6050_gyro_t *gyro);
-float mpu6050_read_temper(void);
-
+//bool mpu6050_init(void);
+//void mpu6050_read_accel(mpu6050_accel_t *accel);
+//void mpu6050_read_gyro(mpu6050_gyro_t *gyro);
+//float mpu6050_read_temper(void);
+//void calibrate_mpu6050();
 
 #endif /* __MPU6050_H__ */

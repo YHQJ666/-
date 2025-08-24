@@ -1,9 +1,11 @@
 #include "snake.h"
 #include "mpu6050.h"
+#include "st7735.h"
+#include "stfonts.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-
+#include <lcd.h>
 // 全局变量定义
 Game_t g_game;
 QueueHandle_t xMPU6050Queue;
@@ -18,7 +20,11 @@ SemaphoreHandle_t xGameStateMutex;
 #define COLOR_BG        0x0000  // 黑色
 
 // MPU6050倾斜阈值
-#define TILT_THRESHOLD  4000
+#define TILT_THRESHOLD  2000
+
+static void draw_cell(uint8_t x, uint8_t y, uint16_t color) {
+    st7735_fill_rect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE, color);
+}
 
 /**
  * @brief 游戏初始化
@@ -40,10 +46,7 @@ void snake_game_init(void) {
     g_game.game_time = 0;
     g_game.winner = 0;
     
-    // 创建FreeRTOS对象
-    xMPU6050Queue = xQueueCreate(10, sizeof(MPU6050Data_t));
-    xDisplaySemaphore = xSemaphoreCreateBinary();
-    xGameStateMutex = xSemaphoreCreateMutex();
+    // FreeRTOS对象在snake_create_tasks()中创建，这里不再重复创建
 }
 
 /**
@@ -133,13 +136,38 @@ void snake_remove_tail(Snake_t* snake) {
 /**
  * @brief 移动蛇
  */
+void snake_draw_step(Snake_t* snake, Position_t food) {
+    if (!snake->alive) return;
+
+    // 1. 画蛇头
+    draw_cell(snake->head->pos.x, snake->head->pos.y, snake->color);
+
+    // 2. 判断是否吃到食物
+    if (snake->head->pos.x == food.x && snake->head->pos.y == food.y) {
+        snake->length++;   // 蛇增长
+        snake->score += 10;
+        // 不擦尾巴（增长）
+    } else {
+        // 3. 擦掉旧尾巴
+        draw_cell(snake->tail->pos.x, snake->tail->pos.y, COLOR_BG);
+    }
+}
+
 void snake_move(Snake_t* snake) {
     if(!snake->alive) return;
-    
-    // 更新方向
+
+//    char buf[64];
+//    sprintf(buf, "snake_move dir=%d head_before=(%d,%d)\r\n",
+//            snake->direction, snake->head->pos.x, snake->head->pos.y);
+//    USART_SendString(buf);
+	
+	// 通过MPU6050获取当前倾斜方向
+//    Direction_t tilt_dir = mpu6050_get_tilt_direction(0.5f); // 阈值0.5g
+//    if (tilt_dir != DIR_NONE) {
+//        snake->next_direction = tilt_dir; // 更新蛇的方向
+//    }
+	
     snake->direction = snake->next_direction;
-    
-    // 计算新头部位置
     Position_t new_head = snake->head->pos;
     switch(snake->direction) {
         case DIR_UP:    new_head.y--; break;
@@ -148,11 +176,8 @@ void snake_move(Snake_t* snake) {
         case DIR_RIGHT: new_head.x++; break;
         default: break;
     }
-    
-    // 添加新头部
     snake_add_head(snake, new_head);
 }
-
 /**
  * @brief 检查蛇自身碰撞
  */
@@ -275,14 +300,24 @@ void snake_process_input(Game_t* game, uint8_t player_id, Direction_e direction)
  * @brief 更新游戏逻辑
  */
 void snake_update_game(Game_t* game) {
-    if(game->game_state != GAME_RUNNING) return;
+//    char buf[64];
+//    sprintf(buf, "[snake_update_game] state=%d\n", game->game_state);
+//    USART_SendString(buf);
+
+    if(game->game_state != GAME_RUNNING) {
+        USART_SendString("Game not running, skip update\n");
+        return;
+    }
     
     // 移动蛇
     snake_move(&game->snake1);
+//	xSemaphoreGive(xDisplaySemaphore);//给显示任务一个刷新信号
     snake_move(&game->snake2);
-    
+//    xSemaphoreGive(xDisplaySemaphore);//给显示任务一个刷新信号
+
     // 检查食物碰撞
     if(snake_check_food_collision(&game->snake1, game->food)) {
+        USART_SendString("Snake1 ate food!\n");
         game->snake1.score += 10;
         snake_generate_food(game);
     } else {
@@ -290,6 +325,7 @@ void snake_update_game(Game_t* game) {
     }
     
     if(snake_check_food_collision(&game->snake2, game->food)) {
+        USART_SendString("Snake2 ate food!\n");
         game->snake2.score += 10;
         snake_generate_food(game);
     } else {
@@ -298,59 +334,65 @@ void snake_update_game(Game_t* game) {
     
     // 检查碰撞
     uint8_t snake1_collision = snake_check_wall_collision(&game->snake1) ||
-                              snake_check_self_collision(&game->snake1) ||
-                              snake_check_snake_collision(&game->snake1, &game->snake2);
-                              
+                               snake_check_self_collision(&game->snake1) ||
+                               snake_check_snake_collision(&game->snake1, &game->snake2);
     uint8_t snake2_collision = snake_check_wall_collision(&game->snake2) ||
-                              snake_check_self_collision(&game->snake2) ||
-                              snake_check_snake_collision(&game->snake2, &game->snake1);
+                               snake_check_self_collision(&game->snake2) ||
+                               snake_check_snake_collision(&game->snake2, &game->snake1);
     
-    if(snake1_collision) game->snake1.alive = 0;
-    if(snake2_collision) game->snake2.alive = 0;
+    if(snake1_collision) {
+        USART_SendString("Snake1 died!\n");
+        game->snake1.alive = 0;
+    }
+    if(snake2_collision) {
+        USART_SendString("Snake2 died!\n");
+        game->snake2.alive = 0;
+    }
     
     // 检查游戏结束
     if(!game->snake1.alive && !game->snake2.alive) {
+        USART_SendString("Game over: draw!\n");
         game->game_state = GAME_OVER;
-        game->winner = 3; // 平局
+        game->winner = 3;
     } else if(!game->snake1.alive) {
+        USART_SendString("Game over: player 2 wins!\n");
         game->game_state = GAME_OVER;
-        game->winner = 2; // 玩家2获胜
+        game->winner = 2;
     } else if(!game->snake2.alive) {
+        USART_SendString("Game over: player 1 wins!\n");
         game->game_state = GAME_OVER;
-        game->winner = 1; // 玩家1获胜
+        game->winner = 1;
     }
 }
+
 
 /**
  * @brief 绘制游戏画面
  */
-void snake_draw_game(Game_t* game) {
-    // 清屏
-    ST7735_FillScreen(COLOR_BG);
-    
-    // 绘制边界
+void snake_draw_init(Game_t* game) {
+    st7735_fill_screen(COLOR_BG);   // 只在初始化用一次
     snake_draw_border();
-    
-    // 绘制蛇
     snake_draw_snake(&game->snake1);
     snake_draw_snake(&game->snake2);
-    
-    // 绘制食物
     snake_draw_food(game->food);
-    
-    // 绘制分数
     snake_draw_score(game);
 }
+
 
 /**
  * @brief 绘制蛇
  */
 void snake_draw_snake(Snake_t* snake) {
     if(!snake->alive) return;
-    
+	
+//    char buf[64];
+//    sprintf(buf, "snake_draw len=%d head=(%d,%d)\r\n",
+//            snake->length, snake->head->pos.x, snake->head->pos.y);
+//    USART_SendString(buf);
+//	
     SnakeNode_t* current = snake->head;
     while(current != NULL) {
-        ST7735_FillRect(
+        st7735_fill_rect(
             current->pos.x * CELL_SIZE,
             current->pos.y * CELL_SIZE,
             CELL_SIZE,
@@ -365,7 +407,7 @@ void snake_draw_snake(Snake_t* snake) {
  * @brief 绘制食物
  */
 void snake_draw_food(Position_t food) {
-    ST7735_FillRect(
+    st7735_fill_rect(
         food.x * CELL_SIZE,
         food.y * CELL_SIZE,
         CELL_SIZE,
@@ -380,14 +422,14 @@ void snake_draw_food(Position_t food) {
 void snake_draw_border(void) {
     // 绘制上下边界
     for(int x = 0; x < GAME_WIDTH; x++) {
-        ST7735_FillRect(x * CELL_SIZE, 0, CELL_SIZE, 1, COLOR_BORDER);
-        ST7735_FillRect(x * CELL_SIZE, (GAME_HEIGHT-1) * CELL_SIZE + CELL_SIZE - 1, CELL_SIZE, 1, COLOR_BORDER);
+        st7735_fill_rect(x * CELL_SIZE, 0, CELL_SIZE, 1, COLOR_BORDER);
+        st7735_fill_rect(x * CELL_SIZE, (GAME_HEIGHT-1) * CELL_SIZE + CELL_SIZE - 1, CELL_SIZE, 1, COLOR_BORDER);
     }
     
     // 绘制左右边界
     for(int y = 0; y < GAME_HEIGHT; y++) {
-        ST7735_FillRect(0, y * CELL_SIZE, 1, CELL_SIZE, COLOR_BORDER);
-        ST7735_FillRect((GAME_WIDTH-1) * CELL_SIZE + CELL_SIZE - 1, y * CELL_SIZE, 1, CELL_SIZE, COLOR_BORDER);
+        st7735_fill_rect(0, y * CELL_SIZE, 1, CELL_SIZE, COLOR_BORDER);
+        st7735_fill_rect((GAME_WIDTH-1) * CELL_SIZE + CELL_SIZE - 1, y * CELL_SIZE, 1, CELL_SIZE, COLOR_BORDER);
     }
 }
 
@@ -399,20 +441,20 @@ void snake_draw_score(Game_t* game) {
     
     // 显示玩家1分数 (红色)
     sprintf(score_str, "P1:%d", game->snake1.score);
-    ST7735_WriteString(2, 2, score_str, Font_7x10, COLOR_SNAKE1, COLOR_BG);
+    st7735_write_string(2, 2, score_str, &font_ascii_8x16, COLOR_SNAKE1, COLOR_BG);
     
     // 显示玩家2分数 (蓝色)
     sprintf(score_str, "P2:%d", game->snake2.score);
-    ST7735_WriteString(90, 2, score_str, Font_7x10, COLOR_SNAKE2, COLOR_BG);
+    st7735_write_string(90, 2, score_str, &font_ascii_8x16, COLOR_SNAKE2, COLOR_BG);
     
     // 游戏结束时显示获胜者
     if(game->game_state == GAME_OVER) {
         if(game->winner == 1) {
-            ST7735_WriteString(50, 60, "P1 WIN!", Font_11x18, COLOR_SNAKE1, COLOR_BG);
+            st7735_write_string(50, 60, "P1 WIN!", &font_ascii_8x16, COLOR_SNAKE1, COLOR_BG);
         } else if(game->winner == 2) {
-            ST7735_WriteString(50, 60, "P2 WIN!", Font_11x18, COLOR_SNAKE2, COLOR_BG);
+            st7735_write_string(50, 60, "P2 WIN!", &font_ascii_8x16, COLOR_SNAKE2, COLOR_BG);
         } else {
-            ST7735_WriteString(55, 60, "DRAW!", Font_11x18, COLOR_BORDER, COLOR_BG);
+            st7735_write_string(55, 60, "DRAW!", &font_ascii_8x16, COLOR_BORDER, COLOR_BG);
         }
     }
 }

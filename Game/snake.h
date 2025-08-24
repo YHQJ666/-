@@ -9,8 +9,8 @@
 #include "semphr.h"
 
 // 游戏配置
-#define GAME_WIDTH          20      // 游戏区域宽度（格子数）
-#define GAME_HEIGHT         16      // 游戏区域高度（格子数）
+#define GAME_WIDTH          16      // 游戏区域宽度（格子数）
+#define GAME_HEIGHT         20      // 游戏区域高度（格子数）
 #define CELL_SIZE           8       // 每个格子的像素大小
 #define MAX_SNAKE_LENGTH    100     // 蛇的最大长度
 #define INITIAL_SNAKE_LENGTH 3      // 蛇的初始长度
@@ -79,10 +79,14 @@ extern SemaphoreHandle_t xDisplaySemaphore;
 extern SemaphoreHandle_t xGameStateMutex;
 
 // 函数声明
+static void draw_cell(uint8_t x, uint8_t y, uint16_t color);
+
 void snake_game_init(void);
 void snake_init(Snake_t* snake, uint8_t start_x, uint8_t start_y, Direction_e dir, uint16_t color);
 void snake_add_head(Snake_t* snake, Position_t new_pos);
 void snake_remove_tail(Snake_t* snake);
+
+void snake_draw_step(Snake_t* snake, Position_t food);
 void snake_move(Snake_t* snake);
 uint8_t snake_check_self_collision(Snake_t* snake);
 uint8_t snake_check_wall_collision(Snake_t* snake);
@@ -91,7 +95,9 @@ uint8_t snake_check_food_collision(Snake_t* snake, Position_t food);
 void snake_generate_food(Game_t* game);
 void snake_process_input(Game_t* game, uint8_t player_id, Direction_e direction);
 void snake_update_game(Game_t* game);
-void snake_draw_game(Game_t* game);
+
+void snake_draw_init(Game_t* game);
+
 void snake_draw_snake(Snake_t* snake);
 void snake_draw_food(Position_t food);
 void snake_draw_border(void);

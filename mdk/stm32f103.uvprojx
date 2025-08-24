@@ -466,24 +466,39 @@
               <FilePath>..\Game\map.h</FilePath>
             </File>
             <File>
-              <FileName>tank.c</FileName>
+              <FileName>mpu6050_adapter.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\Game\tank.c</FilePath>
+              <FilePath>..\Game\mpu6050_adapter.c</FilePath>
             </File>
             <File>
-              <FileName>tank.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Game\tank.h</FilePath>
-            </File>
-            <File>
-              <FileName>bullet.c</FileName>
+              <FileName>snake.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\Game\bullet.c</FilePath>
+              <FilePath>..\Game\snake.c</FilePath>
             </File>
             <File>
-              <FileName>bullet.h</FileName>
+              <FileName>snake.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\Game\bullet.h</FilePath>
+              <FilePath>..\Game\snake.h</FilePath>
+            </File>
+            <File>
+              <FileName>snake_config.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Game\snake_config.h</FilePath>
+            </File>
+            <File>
+              <FileName>snake_tasks.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Game\snake_tasks.c</FilePath>
+            </File>
+            <File>
+              <FileName>system_timer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Game\system_timer.c</FilePath>
+            </File>
+            <File>
+              <FileName>system_timer.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Game\system_timer.h</FilePath>
             </File>
           </Files>
         </Group>

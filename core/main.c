@@ -45,8 +45,8 @@ int main(void)
     
     // 显示启动画面
     st7735_fill_screen(0x0000); // 黑色背景
-    ST7735_WriteString(30, 50, "SNAKE GAME", Font_11x18, 0xFFFF, 0x0000);
-    ST7735_WriteString(20, 80, "Loading...", Font_7x10, 0x07E0, 0x0000);
+    st7735_write_string(30, 50, "SNAKE GAME", &font_ascii_8x16, 0xFFFF, 0x0000);
+    st7735_write_string(20, 80, "Loading...", &font_ascii_8x16, 0x07E0, 0x0000);
     
     // 延时显示启动画面
     for(volatile int i = 0; i < 1000000; i++);
@@ -56,15 +56,28 @@ int main(void)
     
     // 创建贪吃蛇游戏任务
     snake_create_tasks();
-    
-    USART_SendString("Tasks created, starting scheduler...\r\n");
+    USART_SendString("snake_create_tasks!\r\n");
     
     // 启动FreeRTOS调度器
     vTaskStartScheduler();
+    
+    // 如果执行到这里，说明调度器启动失败
+    USART_SendString("ERROR: FreeRTOS scheduler failed to start!\r\n");
     
     // 正常情况下不会执行到这里
     while(1) {
         USART_SendString("Scheduler failed!\r\n");
         for(volatile int i = 0; i < 1000000; i++);
     }
+}
+
+/**
+ * @brief SysTick中断处理函数 - FreeRTOS任务调度的关键函数
+ * @note 这个函数必须存在，否则FreeRTOS任务无法正常调度
+ */
+void SysTick_Handler(void)
+{
+    // 调用FreeRTOS的SysTick处理函数
+    extern void xPortSysTickHandler(void);
+    xPortSysTickHandler();
 }

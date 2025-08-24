@@ -1,0 +1,177 @@
+#include "snake.h"
+#include "mpu6050.h"
+#include "config.h"
+#include <math.h>
+#include <stdlib.h>
+
+// MPU6050倾斜阈值（如果config.h中没有定义）
+#ifndef TILT_THRESHOLD
+#define TILT_THRESHOLD 4000
+#endif
+
+// 外部函数声明
+extern int mpu6050_read_accel_simple(uint8_t device_addr, int16_t* accel_x, int16_t* accel_y, int16_t* accel_z);
+extern Direction_e get_test_direction(uint8_t player_id);
+
+// MPU6050地址定义
+#define MPU6050_ADDR1   0x68    // 第一个MPU6050地址
+#define MPU6050_ADDR2   0x69    // 第二个MPU6050地址（AD0接VCC）
+
+/**
+ * @brief 从MPU6050数据判断方向
+ */
+Direction_e GetDirectionFromMPU(int16_t accel_x, int16_t accel_y) {
+    // 基于加速度计判断倾斜方向
+    if(abs(accel_x) > abs(accel_y)) {
+        if(accel_x > TILT_THRESHOLD) return DIR_RIGHT;
+        if(accel_x < -TILT_THRESHOLD) return DIR_LEFT;
+    } else {
+        if(accel_y > TILT_THRESHOLD) return DIR_DOWN;
+        if(accel_y < -TILT_THRESHOLD) return DIR_UP;
+    }
+    
+    return DIR_INVALID;
+}
+
+/**
+ * @brief MPU6050数据读取任务
+ */
+void vMPU6050Task(void *pvParameters) {
+    MPU6050Data_t mpu_data;
+    int16_t accel_x, accel_y, accel_z;
+    int16_t gyro_x, gyro_y, gyro_z;
+    
+    // 初始化MPU6050
+    mpu6050_init();
+    
+    // 调试输出：任务启动
+    USART_SendString("MPU6050 Task Started\r\n");
+    
+    static uint32_t debug_counter = 0;
+    
+    while(1) {
+        // 读取两个MPU6050的数据
+        for(uint8_t player = 1; player <= 2; player++) {
+            // 切换I2C设备地址
+            uint8_t mpu_addr = (player == 1) ? MPU6050_ADDR1 : MPU6050_ADDR2;
+            
+            // 使用适配器函数读取MPU6050数据
+            if(mpu6050_read_accel_simple(mpu_addr, &accel_x, &accel_y, &accel_z) == 0) {
+                // 方向判断
+                Direction_e new_direction = GetDirectionFromMPU(accel_x, accel_y);
+                
+                if(new_direction != DIR_INVALID) {
+                    mpu_data.player_id = player;
+                    mpu_data.direction = new_direction;
+                    
+                    // 发送到队列（非阻塞）
+                    xQueueSend(xMPU6050Queue, &mpu_data, 0);
+                    USART_SendString("MPU6050 direction sent\r\n");
+                }
+            } else {
+                // 每100次循环输出一次错误信息，避免输出过多
+                if(debug_counter % 100 == 0) {
+                    USART_SendString("MPU6050 read failed\r\n");
+                }
+            }
+        }
+        
+        debug_counter++;
+        vTaskDelay(pdMS_TO_TICKS(50)); // 20Hz采样率
+    }
+}
+
+/**
+ * @brief 游戏逻辑任务
+ */
+void vGameLogicTask(void *pvParameters) {
+    // 调试输出：任务启动
+    USART_SendString("Game Logic Task Started\r\n");
+    
+    uint8_t count = 0;
+    
+    while(1) {
+        count++;
+        if(count > 9) count = 1;
+        
+        // 最简单的输出
+        if(count == 1) USART_SendString("Loop 1\r\n");
+        else if(count == 2) USART_SendString("Loop 2\r\n");
+        else if(count == 3) USART_SendString("Loop 3\r\n");
+        else if(count == 4) USART_SendString("Loop 4\r\n");
+        else if(count == 5) USART_SendString("Loop 5\r\n");
+        else USART_SendString("Loop X\r\n");
+        
+        // 使用简单的循环延时而不是vTaskDelay
+        for(volatile uint32_t i = 0; i < 1000000; i++) {
+            // 空循环延时
+        }
+    }
+}
+
+/**
+ * @brief 显示任务
+ */
+void vDisplayTask(void *pvParameters) {
+    // 调试输出：任务启动
+    USART_SendString("Display Task Started\r\n");
+    
+    // 初始显示
+    if(xSemaphoreTake(xGameStateMutex, portMAX_DELAY) == pdTRUE) {
+        snake_draw_game(&g_game);
+        xSemaphoreGive(xGameStateMutex);
+    }
+    
+    while(1) {
+        // 等待显示更新信号
+        if(xSemaphoreTake(xDisplaySemaphore, portMAX_DELAY) == pdTRUE) {
+            USART_SendString("Display update triggered\r\n");
+            if(xSemaphoreTake(xGameStateMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                snake_draw_game(&g_game);
+                xSemaphoreGive(xGameStateMutex);
+            }
+        }
+    }
+}
+
+/**
+ * @brief 创建所有游戏任务
+ */
+void snake_create_tasks(void) {
+    USART_SendString("Creating queues and semaphores...\r\n");
+    
+    // 创建队列和信号量
+    xMPU6050Queue = xQueueCreate(10, sizeof(MPU6050Data_t));
+    xDisplaySemaphore = xSemaphoreCreateBinary();
+    xGameStateMutex = xSemaphoreCreateMutex();
+    
+    // 检查创建是否成功
+    if(xMPU6050Queue == NULL || xDisplaySemaphore == NULL || xGameStateMutex == NULL) {
+        USART_SendString("ERROR: Failed to create queues/semaphores!\r\n");
+        return;
+    }
+    USART_SendString("Queues and semaphores created successfully\r\n");
+    
+    // 初始化游戏
+    USART_SendString("Initializing game...\r\n");
+    snake_game_init();
+    g_game.game_state = GAME_RUNNING;
+    USART_SendString("Game initialized\r\n");
+    
+    // 创建任务（增加栈大小）
+    USART_SendString("Creating tasks...\r\n");
+    
+    BaseType_t result1 = xTaskCreate(vMPU6050Task, "MPU6050", 256, NULL, 3, NULL);
+    BaseType_t result2 = xTaskCreate(vGameLogicTask, "GameLogic", 1024, NULL, 1, NULL);
+    BaseType_t result3 = xTaskCreate(vDisplayTask, "Display", 256, NULL, 2, NULL);
+    
+    if(result1 != pdPASS || result2 != pdPASS || result3 != pdPASS) {
+        USART_SendString("ERROR: Failed to create one or more tasks!\r\n");
+        return;
+    }
+    USART_SendString("All tasks created successfully\r\n");
+    
+    // 给显示任务一个初始信号，让它绘制初始界面
+    USART_SendString("Giving initial display semaphore...\r\n");
+    xSemaphoreGive(xDisplaySemaphore);
+}
