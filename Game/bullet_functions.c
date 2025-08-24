@@ -1,35 +1,3 @@
-#include "bullet.h"
-#include "tank.h"
-#include "st7735.h"
-#include "config.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include <math.h>
-#include <string.h>
-#include <stdlib.h>
-
-#define M_PI 3.1415926f
-static bullet_t bullets[MAX_BULLETS];
-
-// FreeRTOS 时间获取函数
-static inline uint32_t get_system_tick(void) {
-    return xTaskGetTickCount();
-}
-
-// 子弹颜色定义（RGB565格式）
-#define BULLET_COLOR_PLAYER1  0xF800  // 红色
-#define BULLET_COLOR_PLAYER2  0x001F  // 蓝色
-
-/**
- * @brief 初始化子弹系统
- */
-void bullet_init(void) {
-    memset(bullets, 0, sizeof(bullets));
-    for (int i = 0; i < MAX_BULLETS; i++) {
-        bullets[i].active = 0;
-    }
-}
-
 /**
  * @brief 发射子弹
  * @param tank_id 发射坦克的ID
@@ -38,8 +6,31 @@ void bullet_fire(uint8_t tank_id) {
     // 查找空闲的子弹槽
     int free_slot = -1;
     for (int i = 0; i < MAX_BULLETS; i++) {
-        // 贪吃蛇游戏 - 不需要子弹系统
+        if (!bullets[i].active) {
+            free_slot = i;
+            break;
+        }
     }
+    
+    if (free_slot == -1) return; // 没有空闲槽位
+    
+    // 获取坦克炮口位置
+    muzzle_pos_t muzzle = tank_get_muzzle_position(tank_id);
+    float tank_angle = tank_get_angle(tank_id);
+    
+    // 初始化子弹
+    bullets[free_slot].x = (float)muzzle.x;
+    bullets[free_slot].y = (float)muzzle.y;
+    
+    // 计算子弹速度分量
+    float angle_rad = tank_angle * M_PI / 180.0f;
+    bullets[free_slot].vel_x = BULLET_SPEED * cos(angle_rad);
+    bullets[free_slot].vel_y = BULLET_SPEED * sin(angle_rad);
+    
+    bullets[free_slot].color = (tank_id == 0) ? RED : BLUE;
+    bullets[free_slot].active = 1;
+    bullets[free_slot].spawn_time = HAL_GetTick();
+    bullets[free_slot].owner_id = tank_id;
 }
 
 /**
@@ -47,7 +38,7 @@ void bullet_fire(uint8_t tank_id) {
  */
 void bullet_update(void) {
     static uint32_t last_update = 0;
-    uint32_t current_time = get_system_tick();
+    uint32_t current_time = HAL_GetTick();
     
     if (last_update == 0) {
         last_update = current_time;

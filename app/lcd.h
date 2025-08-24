@@ -1,5 +1,5 @@
-#ifndef __H__
-#define __H__
+#ifndef _LCD_H__
+#define _LCD_H__
 
 
 #include <stdbool.h>

@@ -9,44 +9,16 @@
 #include "key.h"
 #include "USART.h"
 #include "FreeRTOS.h"
-#include "freertos_demo.h"
 #include "task.h"
 #include "delay.h"
 #include "stm32f10x_usart.h"
 #include "mpu6050.h"
 #include "st7735.h"
 #include "stfonts.h"
+#include "snake.h"
+#include <stdlib.h> 
+// 贪吃蛇游戏主程序
 
-TaskHandle_t myTaskHandler;
-
-//// 实现钩子函数
-//void vApplicationIdleHook(void) {
-//    static uint32_t lastPrintTick = 0;
-//    uint32_t currentTick = xTaskGetTickCount();
-//    
-//    // 每隔一段时间打印（避免刷屏）
-//    if (currentTick - lastPrintTick >= 1000) {  // 每1000个tick打印一次
-//        lastPrintTick = currentTick;
-//        }
-//}
-//void myTask(void * arg)
-//{ 
-//	USART_SendString_IT("进入任务\n");
-//	while(1)
-//	{
-////		GPIO_SetBits(GPIOA, GPIO_Pin_2);
-////		
-////		USART_SendString_IT("LED ON\n");
-//		vTaskDelay(5);
-//		USART_SendString_IT("1\n");
-//		
-//		GPIO_ResetBits(GPIOA, GPIO_Pin_2);
-//		
-//		USART_SendString_IT("LED OFF\n");
-//		vTaskDelay(500 / portTICK_PERIOD_MS);
-//		USART_SendString_IT("2\n");
-//	}
-//}
 static void board_lowlevel_init(void)
 {
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);
@@ -59,53 +31,40 @@ static void board_lowlevel_init(void)
 
     RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1, ENABLE);
 }
+// 贪吃蛇游戏 - 已清理坦克相关代码
 
 int main(void)
 {
+    // 硬件初始化
     board_lowlevel_init();
-	usart_Init();
+    usart_Init();
     st7735_init();
-	lcd_init();
-    mpu6050_init();
-	led_init();
-
-	key_init();
-	
-	st7735_fill_screen(RED); // 填红色
-	st7735_fill_screen(GRAY);
     
-	USART_SendString("66666688888\r\n");  // 测试串口
-    USART_SendString("System Started!\n");  // 测试串口
-	st7735_fill_screen(RED);
-	char str[64];
-    while (1)
-    {
-        Delay(20);
-		USART_SendString("循环中 6");
-        mpu6050_accel_t accel;
-        mpu6050_read_accel(&accel);
-
-        mpu6050_gyro_t gyro;
-        mpu6050_read_gyro(&gyro);
-
-        float temp = mpu6050_read_temper();
-
-        sprintf(str, "Accel: %.2f, %.2f, %.2f\r\n", accel.x, accel.y, accel.z);
-		USART_SendString(str);
-		st7735_fill_rect(0, 0, 128, 2, GREEN);
-        st7735_write_string(0,0,str,&font_ascii_8x16,RED,GREEN);
-		Delay(200);
-	}
-	GPIO_InitTypeDef GPIO_InitStruct;
-	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_Out_PP;
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_2;
-	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
-	GPIO_Init(GPIOA, &GPIO_InitStruct);
-	
-	GPIO_ResetBits(GPIOA, GPIO_Pin_2);
-	
-	NVIC_PriorityGroupConfig (NVIC_PriorityGroup_4);  //将所有优先级位指定为抢占优先级位，不留下任何优先级位作为子优先级位
-	freertos_demo();
-	
+    // 发送启动信息
+    USART_SendString("Snake Game Starting...\r\n");
+    
+    // 显示启动画面
+    st7735_fill_screen(0x0000); // 黑色背景
+    ST7735_WriteString(30, 50, "SNAKE GAME", Font_11x18, 0xFFFF, 0x0000);
+    ST7735_WriteString(20, 80, "Loading...", Font_7x10, 0x07E0, 0x0000);
+    
+    // 延时显示启动画面
+    for(volatile int i = 0; i < 1000000; i++);
+    
+    // 设置FreeRTOS优先级组
+    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);
+    
+    // 创建贪吃蛇游戏任务
+    snake_create_tasks();
+    
+    USART_SendString("Tasks created, starting scheduler...\r\n");
+    
+    // 启动FreeRTOS调度器
+    vTaskStartScheduler();
+    
+    // 正常情况下不会执行到这里
+    while(1) {
+        USART_SendString("Scheduler failed!\r\n");
+        for(volatile int i = 0; i < 1000000; i++);
+    }
 }

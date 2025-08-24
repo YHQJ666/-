@@ -430,6 +430,16 @@
               <FileType>5</FileType>
               <FilePath>..\core\input.h</FilePath>
             </File>
+            <File>
+              <FileName>cpnfig.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\core\cpnfig.c</FilePath>
+            </File>
+            <File>
+              <FileName>config.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\core\config.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
